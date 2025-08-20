@@ -44,16 +44,17 @@ class GL:
         # O parâmetro colors é um dicionário com os tipos cores possíveis, para o Polypoint2D
         # você pode assumir inicialmente o desenho dos pontos com a cor emissiva (emissiveColor).
 
-        # O print abaixo é só para vocês verificarem o funcionamento, DEVE SER REMOVIDO.
-        print("Polypoint2D : pontos = {0}".format(point)) # imprime no terminal pontos
-        print("Polypoint2D : colors = {0}".format(colors)) # imprime no terminal as cores
+       
 
-        # Exemplo:
-        pos_x = GL.width//2
-        pos_y = GL.height//2
-        gpu.GPU.draw_pixel([pos_x, pos_y], gpu.GPU.RGB8, [255, 0, 0])  # altera pixel (u, v, tipo, r, g, b)
         # cuidado com as cores, o X3D especifica de (0,1) e o Framebuffer de (0,255)
-        
+        color = [int(v * 255) for v in colors.get("emissiveColor", [1, 1, 1])]
+        for i in range(0, len(point), 2):
+            pos_x = int(point[i])
+            pos_y = int(point[i + 1])
+
+
+            gpu.GPU.draw_pixel([pos_x, pos_y], gpu.GPU.RGB8, color)  # altera pixel (u, v, tipo, r, g, b)
+
     @staticmethod
     def polyline2D(lineSegments, colors):
         """Função usada para renderizar Polyline2D."""
@@ -68,14 +69,35 @@ class GL:
         # O parâmetro colors é um dicionário com os tipos cores possíveis, para o Polyline2D
         # você pode assumir inicialmente o desenho das linhas com a cor emissiva (emissiveColor).
 
-        print("Polyline2D : lineSegments = {0}".format(lineSegments)) # imprime no terminal
-        print("Polyline2D : colors = {0}".format(colors)) # imprime no terminal as cores
-        
-        # Exemplo:
-        pos_x = GL.width//2
-        pos_y = GL.height//2
-        gpu.GPU.draw_pixel([pos_x, pos_y], gpu.GPU.RGB8, [255, 0, 255])  # altera pixel (u, v, tipo, r, g, b)
-        # cuidado com as cores, o X3D especifica de (0,1) e o Framebuffer de (0,255)
+        color = [int(v * 255) for v in colors.get("emissiveColor", [1, 1, 1])]
+        def drawSegment(x0, y0, x1, y1):
+            dx = abs(x1 - x0)
+            sx = 1 if x0 < x1 else -1
+            dy = -abs(y1 - y0)
+            sy = 1 if y0 < y1 else -1
+            error = dx + dy
+
+            while True:
+                if x0 > 0 and y0 > 0 and x0 < GL.width and y0 < GL.height:
+                    gpu.GPU.draw_pixel([x0, y0], gpu.GPU.RGB8, color)
+                e2 = 2 * error
+                if e2 >= dy:
+                    if x0 == x1: break
+                    error = error + dy
+                    x0 = x0 + sx
+                if e2 <= dx:
+                    if y0 == y1: break
+                    error = error + dx
+                    y0 = y0 + sy
+
+
+        for i in range(0, len(lineSegments)-2, 2):
+            
+            x0 = int(lineSegments[i])
+            y0 = int(lineSegments[i + 1])
+            x1 = int(lineSegments[i + 2])
+            y1 = int(lineSegments[i + 3])
+            drawSegment(x0, y0, x1, y1)
 
     @staticmethod
     def circle2D(radius, colors):
@@ -86,15 +108,31 @@ class GL:
         # O parâmetro colors é um dicionário com os tipos cores possíveis, para o Circle2D
         # você pode assumir o desenho das linhas com a cor emissiva (emissiveColor).
 
-        print("Circle2D : radius = {0}".format(radius)) # imprime no terminal
-        print("Circle2D : colors = {0}".format(colors)) # imprime no terminal as cores
-        
-        # Exemplo:
-        pos_x = GL.width//2
-        pos_y = GL.height//2
-        gpu.GPU.draw_pixel([pos_x, pos_y], gpu.GPU.RGB8, [255, 0, 255])  # altera pixel (u, v, tipo, r, g, b)
-        # cuidado com as cores, o X3D especifica de (0,1) e o Framebuffer de (0,255)
 
+        def drawPoint(x,y,color):
+            if (0 <= x < GL.width and
+                0 <= y < GL.height):
+                gpu.GPU.draw_pixel([x, y], gpu.GPU.RGB8, color)
+        color = [int(v * 255) for v in colors.get("emissiveColor", [1, 1, 1])]
+        x = 0
+        y = int(radius)
+        d = 1 - int(radius)
+        while x <= y:
+
+            drawPoint(x, y, color)
+            drawPoint(-x, y, color)
+            drawPoint(x, -y, color)
+            drawPoint(-x, -y, color)
+            drawPoint(y, x, color)
+            drawPoint(-y, x, color)
+            drawPoint(y, -x, color)
+            drawPoint(-y, -x, color)
+            if d < 0:
+                d += 2 * x + 3
+            else:
+                d += 2 * (x - y) + 5
+                y -= 1
+            x += 1
 
     @staticmethod
     def triangleSet2D(vertices, colors):
@@ -107,13 +145,33 @@ class GL:
         # quantidade de pontos é sempre multiplo de 3, ou seja, 6 valores ou 12 valores, etc.
         # O parâmetro colors é um dicionário com os tipos cores possíveis, para o TriangleSet2D
         # você pode assumir inicialmente o desenho das linhas com a cor emissiva (emissiveColor).
-        print("TriangleSet2D : vertices = {0}".format(vertices)) # imprime no terminal
-        print("TriangleSet2D : colors = {0}".format(colors)) # imprime no terminal as cores
-
-        # Exemplo:
-        gpu.GPU.draw_pixel([6, 8], gpu.GPU.RGB8, [255, 255, 0])  # altera pixel (u, v, tipo, r, g, b)
 
 
+
+        color = [int(v * 255) for v in colors.get("emissiveColor", [1, 1, 1])]
+        for i in range(0, len(vertices), 6):
+            a = np.array([vertices[i], vertices[i+1]])
+            b = np.array([vertices[i+2], vertices[i+3]])
+            c = np.array([vertices[i+4], vertices[i+5]])
+
+
+            def L(P0,P1,P):
+                a = P - P0
+                b = P1 - P0
+                m = [[a[0],a[1]],[b[0],b[1]]]
+                return np.linalg.det(m)
+
+            def inside(x,y):
+                return (L(a,b,[x,y]) > 0) and (L(b,c,[x,y]) > 0) and (L(c,a,[x,y]) > 0)
+
+            min_x = max(0, int(min(a[0], b[0], c[0])))
+            min_y = max(0, int(min(a[1], b[1], c[1])))
+            max_x = min(GL.width, int(max(a[0], b[0], c[0])))
+            max_y = min(GL.height, int(max(a[1], b[1], c[1])))
+            for x in range(min_x, max_x):
+                for y in range(min_y, max_y):
+                    if inside(x,y):
+                        gpu.GPU.draw_pixel([x, y], gpu.GPU.RGB8, color)
     @staticmethod
     def triangleSet(point, colors):
         """Função usada para renderizar TriangleSet."""
@@ -463,10 +521,7 @@ class GL:
         # zeroa a um. O campo keyValue deve conter exatamente tantas rotações 3D quanto os
         # quadros-chave no key.
 
-        # O print abaixo é só para vocês verificarem o funcionamento, DEVE SER REMOVIDO.
-        print("OrientationInterpolator : set_fraction = {0}".format(set_fraction))
-        print("OrientationInterpolator : key = {0}".format(key)) # imprime no terminal
-        print("OrientationInterpolator : keyValue = {0}".format(keyValue))
+
 
         # Abaixo está só um exemplo de como os dados podem ser calculados e transferidos
         value_changed = [0, 0, 1, 0]
