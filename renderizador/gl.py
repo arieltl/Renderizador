@@ -23,6 +23,8 @@ class GL:
     height = 600  # altura da tela
     near = 0.01   # plano de corte próximo
     far = 1000    # plano de corte distante
+    transform_stack = []
+    viewpoint_transform = np.identity(4)
 
     @staticmethod
     def setup(width, height, near=0.01, far=1000):
@@ -188,13 +190,48 @@ class GL:
         # inicialmente, para o TriangleSet, o desenho das linhas com a cor emissiva
         # (emissiveColor), conforme implementar novos materias você deverá suportar outros
         # tipos de cores.
+        screen_transform = np.array([
+            [GL.width / 2, 0, 0, GL.width / 2],
+            [0, -GL.height / 2, 0, GL.height / 2],
+            [0, 0, 1, 0],
+            [0, 0, 0, 1]
+        ])
+        color = [int(v * 255) for v in colors.get("emissiveColor", [1, 1, 1])]
+        for i in range(0, len(point), 9):
 
-        # O print abaixo é só para vocês verificarem o funcionamento, DEVE SER REMOVIDO.
-        print("TriangleSet : pontos = {0}".format(point)) # imprime no terminal pontos
-        print("TriangleSet : colors = {0}".format(colors)) # imprime no terminal as cores
+            a = np.array([point[i], point[i+1], point[i+2], 1.0])
+            b = np.array([point[i+3], point[i+4], point[i+5], 1.0])
+            c = np.array([point[i+6], point[i+7], point[i+8], 1.0])
+            #apply transform and view projection using @
+            a = GL.viewpoint_transform @ GL.transform_stack[-1] @ a
+            b = GL.viewpoint_transform @ GL.transform_stack[-1] @ b
+            c = GL.viewpoint_transform @ GL.transform_stack[-1] @ c
+            #normalize
+            a = a / a[3]
+            b = b / b[3]
+            c = c / c[3]
+            a =( screen_transform @ a)[:2]
+            b = ( screen_transform @ b)[:2]
+            c = ( screen_transform @ c)[:2]
+            def L(P0,P1,P):
+                a = P - P0
+                b = P1 - P0
+                m = [[a[0],a[1]],[b[0],b[1]]]
+                return np.linalg.det(m)
 
-        # Exemplo de desenho de um pixel branco na coordenada 10, 10
-        gpu.GPU.draw_pixel([10, 10], gpu.GPU.RGB8, [255, 255, 255])  # altera pixel
+            def inside(x,y):
+                return (L(a,b,[x,y]) > 0) and (L(b,c,[x,y]) > 0) and (L(c,a,[x,y]) > 0)
+
+            min_x = max(0, int(min(a[0], b[0], c[0])))
+            min_y = max(0, int(min(a[1], b[1], c[1])))
+            max_x = min(GL.width, int(max(a[0], b[0], c[0])))
+            max_y = min(GL.height, int(max(a[1], b[1], c[1])))
+            for x in range(min_x, max_x):
+                for y in range(min_y, max_y):
+                    if inside(x,y):
+                        gpu.GPU.draw_pixel([x, y], gpu.GPU.RGB8, color)
+            
+
 
     @staticmethod
     def viewpoint(position, orientation, fieldOfView):
@@ -204,10 +241,58 @@ class GL:
         # perspectiva para poder aplicar nos pontos dos objetos geométricos.
 
         # O print abaixo é só para vocês verificarem o funcionamento, DEVE SER REMOVIDO.
-        print("Viewpoint : ", end='')
-        print("position = {0} ".format(position), end='')
-        print("orientation = {0} ".format(orientation), end='')
-        print("fieldOfView = {0} ".format(fieldOfView))
+        global viewpoint_transform
+
+        eye = np.array(position)
+        rotation = GL.rotation_mat(orientation[:3], orientation[3])[:3, :3]
+        up = np.matmul(rotation, np.array([0, 1, 0]))
+    
+        forward = np.matmul(rotation, np.array([0, 0, -1]))
+        at = eye + forward
+        # divide by 4th component
+
+        w = (at - eye)[:3]
+        up = up[:3]
+        w = w / float(np.linalg.norm(w))
+
+        u = np.linalg.cross(w, up)
+        u = u / float(np.linalg.norm(u))
+
+        v = np.linalg.cross(u, w)
+        v = v / float(np.linalg.norm(v))
+
+        R = np.array([
+            [u[0], v[0], -w[0], 0],
+            [u[1], v[1], -w[1], 0],
+            [u[2], v[2], -w[2], 0],
+            [0, 0, 0, 1]
+        ]).T
+
+        E = np.array([
+            [1, 0, 0, -eye[0]],
+            [0, 1, 0, -eye[1]],
+            [0, 0, 1, -eye[2]],
+            [0, 0, 0, 1]
+        ])
+
+        lookat = np.matmul(R, E)
+        far = GL.far
+        near = GL.near
+        
+        top = near * np.tan(fieldOfView/2)
+        aspect = GL.width / GL.height
+        right = top * aspect
+        bottom = -top
+        left = -right
+        perspective = np.array([
+            [near / right, 0, 0, 0],
+            [0, near / top, 0, 0],
+            [0, 0, - (far + near) / (far - near), -2 * far * near / (far - near)],
+            [0, 0, -1, 0]
+        ])
+        m = np.matmul(perspective, lookat)
+        GL.viewpoint_transform = m
+
 
     @staticmethod
     def transform_in(translation, scale, rotation):
@@ -223,14 +308,45 @@ class GL:
         # Você precisará usar alguma estrutura de dados pilha para organizar as matrizes.
 
         # O print abaixo é só para vocês verificarem o funcionamento, DEVE SER REMOVIDO.
-        print("Transform : ", end='')
+        # Build local matrices
+        t_mat = np.identity(4)
+        s_mat = np.identity(4)
+        r_mat = np.identity(4)
         if translation:
-            print("translation = {0} ".format(translation), end='') # imprime no terminal
+            t_mat[:3, 3] = translation
         if scale:
-            print("scale = {0} ".format(scale), end='') # imprime no terminal
+            s_mat[:3, :3] = np.diag(scale)
         if rotation:
-            print("rotation = {0} ".format(rotation), end='') # imprime no terminal
+            axis = rotation[:3]
+            angle = rotation[3]
+            r_mat = GL.rotation_mat(axis, angle)
+        m_local = np.matmul(t_mat, np.matmul(r_mat, s_mat))
+        m_parent = GL.transform_stack[-1] if len(GL.transform_stack) > 0 else np.identity(4)
+        m = np.matmul(m_parent, m_local)
+        
+        GL.transform_stack.append(m)
         print("")
+
+    @staticmethod
+    def rotation_mat(axis, angle):
+  
+        axis = np.array(axis, dtype=float)
+        norm = np.linalg.norm(axis)
+        if norm == 0:
+            return np.identity(4)
+        ux, uy, uz = axis / norm
+        half = angle / 2.0
+        sin_half = np.sin(half)
+        qx = ux * sin_half
+        qy = uy * sin_half
+        qz = uz * sin_half
+        qr = np.cos(half)
+        transform = np.array([[1 - 2*(qy**2 + qz**2), 2*(qx*qy - qz*qr), 2*(qx*qz + qy*qr), 0],
+                                  [2*(qx*qy + qz*qr), 1 - 2*(qx**2 + qz**2), 2*(qy*qz - qx*qr), 0],
+                                  [2*(qx*qz - qy*qr), 2*(qy*qz + qx*qr), 1 - 2*(qx**2 + qy**2), 0],
+                                  [0, 0, 0, 1]])
+                              
+        return transform
 
     @staticmethod
     def transform_out():
@@ -239,9 +355,7 @@ class GL:
         # grafo de cena. Não são passados valores, porém quando se sai de um nó transform se
         # deverá recuperar a matriz de transformação dos modelos do mundo da estrutura de
         # pilha implementada.
-
-        # O print abaixo é só para vocês verificarem o funcionamento, DEVE SER REMOVIDO.
-        print("Saindo de Transform")
+        GL.transform_stack.pop()
 
     @staticmethod
     def triangleStripSet(point, stripCount, colors):
