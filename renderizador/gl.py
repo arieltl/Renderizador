@@ -25,6 +25,8 @@ class GL:
     far = 1000    # plano de corte distante
     transform_stack = []
     viewpoint_transform = np.identity(4)
+    perspective_transform = np.identity(4)
+    screen_transform = np.identity(4)
 
     @staticmethod
     def setup(width, height, near=0.01, far=1000):
@@ -175,6 +177,70 @@ class GL:
                     if inside(x,y):
                         gpu.GPU.draw_pixel([x, y], gpu.GPU.RGB8, color)
     @staticmethod
+    def draw_triangle(a, b, c, transform, color):
+        """Draw a single triangle with given vertices, transform matrix, and color."""
+        # Convert to homogeneous coordinates
+        a = np.array([a[0], a[1], a[2], 1.0])
+        b = np.array([b[0], b[1], b[2], 1.0])
+        c = np.array([c[0], c[1], c[2], 1.0])
+        
+        # Apply transform
+        a = transform @ a
+        b = transform @ b
+        c = transform @ c
+        
+        # Normalize
+        a = a / a[3]
+        b = b / b[3]
+        c = c / c[3]
+        
+        # Take screen coordinates
+        a = a[:2]
+        b = b[:2]
+        c = c[:2]
+        
+        def L(P0, P1, P):
+            a = P - P0
+            b = P1 - P0
+            m = [[a[0], a[1]], [b[0], b[1]]]
+            return np.linalg.det(m)
+
+        def inside(x, y):
+            return (L(a, b, [x, y]) > 0) and (L(b, c, [x, y]) > 0) and (L(c, a, [x, y]) > 0)
+
+        min_x = max(0, int(min(a[0], b[0], c[0])))
+        min_y = max(0, int(min(a[1], b[1], c[1])))
+        max_x = min(GL.width, int(max(a[0], b[0], c[0]))+1)
+        max_y = min(GL.height, int(max(a[1], b[1], c[1]))+1)
+        
+        for x in range(min_x, max_x):
+            for y in range(min_y, max_y):
+                if inside(x, y):
+                    gpu.GPU.draw_pixel([x, y], gpu.GPU.RGB8, color)
+
+
+    @staticmethod
+    def draw_triangle_2d(a, b, c, color):
+        def L(P0, P1, P):
+            a = P - P0
+            b = P1 - P0
+            m = [[a[0], a[1]], [b[0], b[1]]]
+            return np.linalg.det(m)
+
+        def inside(x, y):
+            return (L(a, b, [x, y]) > 0) and (L(b, c, [x, y]) > 0) and (L(c, a, [x, y]) > 0)
+
+        min_x = max(0, int(min(a[0], b[0], c[0])))
+        min_y = max(0, int(min(a[1], b[1], c[1])))
+        max_x = min(GL.width, int(max(a[0], b[0], c[0]))+1)
+        max_y = min(GL.height, int(max(a[1], b[1], c[1]))+1)
+        
+        for x in range(min_x, max_x):
+            for y in range(min_y, max_y):
+                if inside(x, y):
+                    gpu.GPU.draw_pixel([x, y], gpu.GPU.RGB8, color)
+
+
     def triangleSet(point, colors):
         """Função usada para renderizar TriangleSet."""
         # https://www.web3d.org/specifications/X3Dv4/ISO-IEC19775-1v4-IS/Part01/components/rendering.html#TriangleSet
@@ -190,46 +256,19 @@ class GL:
         # inicialmente, para o TriangleSet, o desenho das linhas com a cor emissiva
         # (emissiveColor), conforme implementar novos materias você deverá suportar outros
         # tipos de cores.
-        screen_transform = np.array([
-            [GL.width / 2, 0, 0, GL.width / 2],
-            [0, -GL.height / 2, 0, GL.height / 2],
-            [0, 0, 1, 0],
-            [0, 0, 0, 1]
-        ])
         color = [int(v * 255) for v in colors.get("emissiveColor", [1, 1, 1])]
+        
+        # Pre-calculate the composed transform matrix
+        composed_transform = GL.viewpoint_transform @ GL.transform_stack[-1]
+        
         for i in range(0, len(point), 9):
-
-            a = np.array([point[i], point[i+1], point[i+2], 1.0])
-            b = np.array([point[i+3], point[i+4], point[i+5], 1.0])
-            c = np.array([point[i+6], point[i+7], point[i+8], 1.0])
-            #apply transform and view projection using @
-            a = GL.viewpoint_transform @ GL.transform_stack[-1] @ a
-            b = GL.viewpoint_transform @ GL.transform_stack[-1] @ b
-            c = GL.viewpoint_transform @ GL.transform_stack[-1] @ c
-            #normalize
-            a = a / a[3]
-            b = b / b[3]
-            c = c / c[3]
-            a =( screen_transform @ a)[:2]
-            b = ( screen_transform @ b)[:2]
-            c = ( screen_transform @ c)[:2]
-            def L(P0,P1,P):
-                a = P - P0
-                b = P1 - P0
-                m = [[a[0],a[1]],[b[0],b[1]]]
-                return np.linalg.det(m)
-
-            def inside(x,y):
-                return (L(a,b,[x,y]) > 0) and (L(b,c,[x,y]) > 0) and (L(c,a,[x,y]) > 0)
-
-            min_x = max(0, int(min(a[0], b[0], c[0])))
-            min_y = max(0, int(min(a[1], b[1], c[1])))
-            max_x = min(GL.width, int(max(a[0], b[0], c[0])))
-            max_y = min(GL.height, int(max(a[1], b[1], c[1])))
-            for x in range(min_x, max_x):
-                for y in range(min_y, max_y):
-                    if inside(x,y):
-                        gpu.GPU.draw_pixel([x, y], gpu.GPU.RGB8, color)
+            # Extract triangle vertices
+            a = [point[i], point[i+1], point[i+2]]
+            b = [point[i+3], point[i+4], point[i+5]]
+            c = [point[i+6], point[i+7], point[i+8]]
+            
+            # Draw triangle using the extracted function
+            GL.draw_triangle(a, b, c, composed_transform, color)
             
 
 
@@ -290,7 +329,16 @@ class GL:
             [0, 0, - (far + near) / (far - near), -2 * far * near / (far - near)],
             [0, 0, -1, 0]
         ])
-        m = np.matmul(perspective, lookat)
+
+        screen_transform = np.array([
+            [GL.width / 2, 0, 0, GL.width / 2],
+            [0, -GL.height / 2, 0, GL.height / 2],
+            [0, 0, 1, 0],
+            [0, 0, 0, 1]
+        ])
+        GL.perspective_transform = np.matmul(perspective, lookat)
+        GL.screen_transform = screen_transform
+        m = np.matmul(screen_transform, GL.perspective_transform)
         GL.viewpoint_transform = m
 
 
@@ -325,7 +373,6 @@ class GL:
         m = np.matmul(m_parent, m_local)
         
         GL.transform_stack.append(m)
-        print("")
 
     @staticmethod
     def rotation_mat(axis, angle):
@@ -372,15 +419,24 @@ class GL:
         # depois 2, 3 e 4, e assim por diante. Cuidado com a orientação dos vértices, ou seja,
         # todos no sentido horário ou todos no sentido anti-horário, conforme especificado.
 
-        # O print abaixo é só para vocês verificarem o funcionamento, DEVE SER REMOVIDO.
-        print("TriangleStripSet : pontos = {0} ".format(point), end='')
-        for i, strip in enumerate(stripCount):
-            print("strip[{0}] = {1} ".format(i, strip), end='')
-        print("")
-        print("TriangleStripSet : colors = {0}".format(colors)) # imprime no terminal as cores
 
-        # Exemplo de desenho de um pixel branco na coordenada 10, 10
-        gpu.GPU.draw_pixel([10, 10], gpu.GPU.RGB8, [255, 255, 255])  # altera pixel
+        strip_start = 0
+        transform = GL.transform_stack[-1]
+        viewpoint_transform = GL.viewpoint_transform
+        transform = viewpoint_transform @ transform
+        color = [int(v * 255) for v in colors.get("emissiveColor", [1, 1, 1])]
+        for strip_size in stripCount:
+            for triangle_i in range(strip_start, strip_start + (strip_size-2)*3,3):
+                starting_coord = triangle_i 
+                a = [point[starting_coord], point[starting_coord + 1], point[starting_coord + 2]]
+                b = [point[starting_coord + 3], point[starting_coord + 4], point[starting_coord + 5]]
+                c = [point[starting_coord + 6], point[starting_coord + 7], point[starting_coord + 8]]
+                area2 = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+                if area2 < 0:
+                    b, c = c, b  # enforce CCW winding
+                GL.draw_triangle(a, b, c, transform, color)
+            strip_start += (strip_size*3)
+
 
     @staticmethod
     def indexedTriangleStripSet(point, index, colors):
@@ -399,11 +455,23 @@ class GL:
         # todos no sentido horário ou todos no sentido anti-horário, conforme especificado.
 
         # O print abaixo é só para vocês verificarem o funcionamento, DEVE SER REMOVIDO.
-        print("IndexedTriangleStripSet : pontos = {0}, index = {1}".format(point, index))
-        print("IndexedTriangleStripSet : colors = {0}".format(colors)) # imprime as cores
+        transform = GL.transform_stack[-1]
+        viewpoint_transform = GL.viewpoint_transform
+        transform = viewpoint_transform @ transform
+        color = [int(v * 255) for v in colors.get("emissiveColor", [1, 1, 1])]
+        odd = False
+        for vertex_i in range(0, len(index)-3):
+            a_i = index[vertex_i] * 3
+            b_i = index[vertex_i + 1] * 3
+            c_i = index[vertex_i + 2] * 3
+            if odd:
+                b_i, c_i = c_i, b_i
+            odd = not odd
+            a = [point[a_i], point[a_i + 1], point[a_i + 2]]
+            b = [point[b_i], point[b_i + 1], point[b_i + 2]]
+            c = [point[c_i], point[c_i + 1], point[c_i + 2]]
+            GL.draw_triangle(a, b, c, transform, color)
 
-        # Exemplo de desenho de um pixel branco na coordenada 10, 10
-        gpu.GPU.draw_pixel([10, 10], gpu.GPU.RGB8, [255, 255, 255])  # altera pixel
 
     @staticmethod
     def indexedFaceSet(coord, coordIndex, colorPerVertex, color, colorIndex,
@@ -431,22 +499,52 @@ class GL:
         # implementadado um método para a leitura de imagens.
 
         # Os prints abaixo são só para vocês verificarem o funcionamento, DEVE SER REMOVIDO.
-        print("IndexedFaceSet : ")
-        if coord:
-            print("\tpontos(x, y, z) = {0}, coordIndex = {1}".format(coord, coordIndex))
-        print("colorPerVertex = {0}".format(colorPerVertex))
-        if colorPerVertex and color and colorIndex:
-            print("\tcores(r, g, b) = {0}, colorIndex = {1}".format(color, colorIndex))
-        if texCoord and texCoordIndex:
-            print("\tpontos(u, v) = {0}, texCoordIndex = {1}".format(texCoord, texCoordIndex))
-        if current_texture:
-            image = gpu.GPU.load_texture(current_texture[0])
-            print("\t Matriz com image = {0}".format(image))
-            print("\t Dimensões da image = {0}".format(image.shape))
-        print("IndexedFaceSet : colors = {0}".format(colors))  # imprime no terminal as cores
+        # print("IndexedFaceSet : ")
+        # if coord:
+        #     print("\tpontos(x, y, z) = {0}, coordIndex = {1}".format(coord, coordIndex))
+        # print("colorPerVertex = {0}".format(colorPerVertex))
+        # if colorPerVertex and color and colorIndex:
+        #     print("\tcores(r, g, b) = {0}, colorIndex = {1}".format(color, colorIndex))
+        # if texCoord and texCoordIndex:
+        #     print("\tpontos(u, v) = {0}, texCoordIndex = {1}".format(texCoord, texCoordIndex))
+        # if current_texture:
+        #     image = gpu.GPU.load_texture(current_texture[0])
+        #     print("\t Matriz com image = {0}".format(image))
+        #     print("\t Dimensões da image = {0}".format(image.shape))
+        # print("IndexedFaceSet : colors = {0}".format(colors))  # imprime no terminal as cores
+        coords_lists = [[]]
+        transform = GL.viewpoint_transform @ GL.transform_stack[-1]
 
-        # Exemplo de desenho de um pixel branco na coordenada 10, 10
-        gpu.GPU.draw_pixel([10, 10], gpu.GPU.RGB8, [255, 255, 255])  # altera pixel
+        coords_np = np.array(coord, dtype=float).reshape(-1, 3)         # [N,3]
+        ones = np.ones((coords_np.shape[0], 1), dtype=float)            # [N,1]
+        coords4 = np.hstack([coords_np, ones])                          # [N,4]
+
+        clip = coords4 @ transform.T                                    # [N,4]
+        clip /= clip[:, [3]]                                            # normalize
+
+        coords_xy = clip[:, :2]      
+        color = [int(v * 255) for v in colors.get("emissiveColor", [1, 1, 1])]
+        for coord_i in coordIndex:
+            if coord_i == -1:
+                coords_lists.append([])
+            else:
+                coords_lists[-1].append(coord_i)
+        for face in coords_lists:
+            if len(face) < 3:
+                continue
+            a = coords_xy[face[0]]
+
+            for i in range(1, len(face)-1):
+                b = coords_xy[face[i]]
+                c = coords_xy[face[i+1]]
+                area2 = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+                if area2 > 0:
+                    b, c = c, b  # enforce CCW winding
+                
+                GL.draw_triangle_2d(a, b, c, color)
+
+
+    
 
     @staticmethod
     def box(size, colors):
