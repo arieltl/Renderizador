@@ -19,7 +19,7 @@ import gpu          # Simula os recursos de uma GPU
 
 import x3d          # Faz a leitura do arquivo X3D, gera o grafo de cena e faz traversal
 import scenegraph   # Imprime o grafo de cena no console
-
+import numpy as np
 LARGURA = 60  # Valor padrão para largura da tela
 ALTURA = 40   # Valor padrão para altura da tela
 
@@ -42,12 +42,15 @@ class Renderizador:
 
         # Cria uma (1) posição de FrameBuffer na GPU
         fbo = gpu.GPU.gen_framebuffers(1)
-
         # Define o atributo FRONT como o FrameBuffe principal
         self.framebuffers["FRONT"] = fbo[0]
+        
+
+        fbsuper = gpu.GPU.gen_framebuffers(1)
+        self.framebuffers["SUPER"] = fbsuper[0]
 
         # Define que a posição criada será usada para desenho e leitura
-        gpu.GPU.bind_framebuffer(gpu.GPU.FRAMEBUFFER, self.framebuffers["FRONT"])
+        gpu.GPU.bind_framebuffer(gpu.GPU.FRAMEBUFFER, self.framebuffers["SUPER"])
         # Opções:
         # - DRAW_FRAMEBUFFER: Faz o bind só para escrever no framebuffer
         # - READ_FRAMEBUFFER: Faz o bind só para leitura no framebuffer
@@ -62,6 +65,13 @@ class Renderizador:
             gpu.GPU.RGB8,
             self.width,
             self.height
+        )
+        gpu.GPU.framebuffer_storage(
+            self.framebuffers["SUPER"],
+            gpu.GPU.COLOR_ATTACHMENT,
+            gpu.GPU.RGB8,
+            self.width * self.super_sampling_factor,
+            self.height * self.super_sampling_factor
         )
 
         # Descomente as seguintes linhas se for usar um Framebuffer para profundidade
@@ -112,6 +122,22 @@ class Renderizador:
         # Essa é uma chamada conveniente para manipulação de buffers
         # ao final da renderização de um frame. Como por exemplo, executar
         # downscaling da imagem.
+        
+        gpu.GPU.bind_framebuffer(gpu.GPU.FRAMEBUFFER, self.framebuffers["SUPER"])
+        ss = self.super_sampling_factor
+        #create np array to store pixels
+        pixels = np.zeros((self.height, self.width, 3))
+        for i in range(self.height):
+            for j in range(self.width):
+                for i_offset in range(ss):
+                    for j_offset in range(ss):
+                        pixel = gpu.GPU.read_pixel([j*ss + j_offset, i*ss + i_offset], gpu.GPU.RGB8)
+                        pixels[i, j] += pixel
+        pixels = pixels / (ss*ss)
+        gpu.GPU.bind_framebuffer(gpu.GPU.FRAMEBUFFER, self.framebuffers["FRONT"])
+        for i in range(self.height):
+            for j in range(self.width):
+                gpu.GPU.draw_pixel([j, i], gpu.GPU.RGB8, pixels[i, j])
 
         # Método para a troca dos buffers (NÃO IMPLEMENTADO)
         # Esse método será utilizado na fase de implementação de animações
@@ -178,11 +204,11 @@ class Renderizador:
 
         # Abre arquivo X3D
         self.scene = x3d.X3D(self.x3d_file)
-
+        self.super_sampling_factor = 3
         # Iniciando Biblioteca Gráfica
         gl.GL.setup(
-            self.width,
-            self.height,
+            self.width*self.super_sampling_factor,
+            self.height*self.super_sampling_factor,
             near=0.01,
             far=1000
         )
