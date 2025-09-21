@@ -25,8 +25,12 @@ class GL:
     far = 1000    # plano de corte distante
     transform_stack = []
     viewpoint_transform = np.identity(4)
-    perspective_transform = np.identity(4)
+    camera_transform = np.identity(4)
+    camera_perspective_transform = np.identity(4)
     screen_transform = np.identity(4)
+    perspective_transform = np.identity(4)
+    supersample = 1
+
 
     @staticmethod
     def setup(width, height, near=0.01, far=1000):
@@ -53,8 +57,8 @@ class GL:
         # cuidado com as cores, o X3D especifica de (0,1) e o Framebuffer de (0,255)
         color = [int(v * 255) for v in colors.get("emissiveColor", [1, 1, 1])]
         for i in range(0, len(point), 2):
-            pos_x = int(point[i])
-            pos_y = int(point[i + 1])
+            pos_x = int(point[i] * GL.supersample)
+            pos_y = int(point[i + 1] * GL.supersample)
 
 
             gpu.GPU.draw_pixel([pos_x, pos_y], gpu.GPU.RGB8, color)  # altera pixel (u, v, tipo, r, g, b)
@@ -96,11 +100,11 @@ class GL:
 
 
         for i in range(0, len(lineSegments)-2, 2):
-            
-            x0 = int(lineSegments[i])
-            y0 = int(lineSegments[i + 1])
-            x1 = int(lineSegments[i + 2])
-            y1 = int(lineSegments[i + 3])
+
+            x0 = int(lineSegments[i] * GL.supersample) 
+            y0 = int(lineSegments[i + 1] * GL.supersample)
+            x1 = int(lineSegments[i + 2] * GL.supersample)
+            y1 = int(lineSegments[i + 3] * GL.supersample)
             drawSegment(x0, y0, x1, y1)
 
     @staticmethod
@@ -119,8 +123,8 @@ class GL:
                 gpu.GPU.draw_pixel([x, y], gpu.GPU.RGB8, color)
         color = [int(v * 255) for v in colors.get("emissiveColor", [1, 1, 1])]
         x = 0
-        y = int(radius)
-        d = 1 - int(radius)
+        y = int(radius * GL.supersample)
+        d = 1 - int(radius * GL.supersample)
         while x <= y:
 
             drawPoint(x, y, color)
@@ -154,9 +158,9 @@ class GL:
 
         color = [int(v * 255) for v in colors.get("emissiveColor", [1, 1, 1])]
         for i in range(0, len(vertices), 6):
-            a = np.array([vertices[i], vertices[i+1]])
-            b = np.array([vertices[i+2], vertices[i+3]])
-            c = np.array([vertices[i+4], vertices[i+5]])
+            a = np.array([vertices[i] * GL.supersample, vertices[i+1] * GL.supersample])
+            b = np.array([vertices[i+2] * GL.supersample, vertices[i+3] * GL.supersample])
+            c = np.array([vertices[i+4] * GL.supersample, vertices[i+5] * GL.supersample])
 
 
             def L(P0,P1,P):
@@ -220,7 +224,20 @@ class GL:
 
 
     @staticmethod
-    def draw_triangle_2d(a, b, c, color):
+    def draw_triangle_2d(a, b, c, color, colors=None, zs=None, uvs=None, texture=None, transparency=None):
+
+        #
+        za = a[2]
+        zb = b[2]
+        zc = c[2]
+
+
+        a = a[:2]
+        b = b[:2]
+        c = c[:2]
+
+
+
         def L(P0, P1, P):
             a = P - P0
             b = P1 - P0
@@ -228,17 +245,80 @@ class GL:
             return np.linalg.det(m)
 
         def inside(x, y):
-            return (L(a, b, [x, y]) > 0) and (L(b, c, [x, y]) > 0) and (L(c, a, [x, y]) > 0)
+            return (L(a, b, [x, y]) >=  0) and (L(b, c, [x, y]) >= 0) and (L(c, a, [x, y]) >= 0)
 
         min_x = max(0, int(min(a[0], b[0], c[0])))
         min_y = max(0, int(min(a[1], b[1], c[1])))
         max_x = min(GL.width, int(max(a[0], b[0], c[0]))+1)
         max_y = min(GL.height, int(max(a[1], b[1], c[1]))+1)
+
+        # Precompute oriented triangle area (twice the area). Requires CCW winding for inside()
+        area2 = L(a, b, c)
+ 
         
         for x in range(min_x, max_x):
             for y in range(min_y, max_y):
                 if inside(x, y):
-                    gpu.GPU.draw_pixel([x, y], gpu.GPU.RGB8, color)
+                
+                    # Barycentric weights
+                    alpha = L([x, y], b, c) / area2
+                    beta  = L([x, y], c, a) / area2
+                    gamma = L([x, y], a, b) / area2
+
+                    out_color = color
+                    ndc_z = (alpha * za + beta * zb + gamma * zc)
+                    buffer_z = gpu.GPU.read_pixel([x, y], gpu.GPU.DEPTH_COMPONENT32F)[0]
+                    if ndc_z >= buffer_z:
+                        continue
+                    gpu.GPU.draw_pixel([x, y], gpu.GPU.DEPTH_COMPONENT32F, [ndc_z])
+                    z = None
+                    if zs is not None:
+                        z0, z1, z2 = zs
+                        denom_z = (alpha / z0 + beta / z1 + gamma / z2)
+                        z = 1.0 / denom_z
+
+
+                    if colors is not None and colors[0] is not None:
+                        if z is not None:
+                            w0 = (alpha / z0)
+                            w1 = (beta / z1)
+                            w2 = (gamma / z2)
+                            rgb = w0 * colors[0] + w1 * colors[1] + w2 * colors[2]
+                            out_color = [int(vv * 255 * z) for vv in rgb]
+
+                        else:
+                            rgb = alpha * colors[0] + beta * colors[1] + gamma * colors[2]
+                            out_color = [int(vv * 255) for vv in rgb]
+
+
+                    # Texturing (requires uvs, texture, and zs for perspective-correct UV)
+                    if texture is not None and uvs is not None and z is not None:
+                        (u0, v0), (u1, v1), (u2, v2) = uvs
+                        u = (alpha * (u0 / z0) + beta * (u1 / z1) + gamma * (u2 / z2)) * z
+                        v = (alpha * (v0 / z0) + beta * (v1 / z1) + gamma * (v2 / z2)) * z
+                        # Sample texture with clamp to edge
+
+                        w_tex, h = texture.shape[0], texture.shape[1]
+                        tx = int(u * w_tex)
+                        ty = int((1-v) * h)
+                        if tx < 0: tx = 0
+                        if ty < 0: ty = 0
+                        if tx >= w_tex: tx = w_tex - 1
+                        if ty >= h: ty = h - 1
+                        texel = texture[tx, ty]
+                        tr = int(texel[0])
+                        tg = int(texel[1])
+                        tb = int(texel[2])
+
+                        out_color = [tr, tg, tb]
+                    if transparency is not None and transparency != 1.0:
+                        old_color = [float(v) for v in gpu.GPU.read_pixel([x, y], gpu.GPU.RGB8)]
+                       
+                        new_color = [float(v) for v in out_color]
+                        out_color = [int(ov *transparency + nv * (1 - transparency)) for ov, nv in zip(old_color, new_color)]
+                    
+
+                    gpu.GPU.draw_pixel([x, y], gpu.GPU.RGB8, out_color)
 
 
     def triangleSet(point, colors):
@@ -257,18 +337,26 @@ class GL:
         # (emissiveColor), conforme implementar novos materias você deverá suportar outros
         # tipos de cores.
         color = [int(v * 255) for v in colors.get("emissiveColor", [1, 1, 1])]
-        
+        print("set")
+        print(colors)
         # Pre-calculate the composed transform matrix
         composed_transform = GL.viewpoint_transform @ GL.transform_stack[-1]
         
         for i in range(0, len(point), 9):
             # Extract triangle vertices
-            a = [point[i], point[i+1], point[i+2]]
-            b = [point[i+3], point[i+4], point[i+5]]
-            c = [point[i+6], point[i+7], point[i+8]]
+            a = [point[i], point[i+1], point[i+2],1]
+            b = [point[i+3], point[i+4], point[i+5],1]
+            c = [point[i+6], point[i+7], point[i+8],1]
+            #precompute the transform
+            a = composed_transform @ a
+            b = composed_transform @ b
+            c = composed_transform @ c
+            a = a[:3] / a[3]
+            b = b[:3] / b[3]
+            c = c[:3] / c[3]
             
             # Draw triangle using the extracted function
-            GL.draw_triangle(a, b, c, composed_transform, color)
+            GL.draw_triangle_2d(a, b, c, color, transparency=colors.get("transparency", None))
             
 
 
@@ -336,9 +424,12 @@ class GL:
             [0, 0, 1, 0],
             [0, 0, 0, 1]
         ])
-        GL.perspective_transform = np.matmul(perspective, lookat)
+
+        GL.camera_transform = lookat
+        GL.camera_perspective_transform = np.matmul(perspective, lookat)
+        GL.perspective_transform = perspective
         GL.screen_transform = screen_transform
-        m = np.matmul(screen_transform, GL.perspective_transform)
+        m = np.matmul(screen_transform, GL.camera_perspective_transform)
         GL.viewpoint_transform = m
 
 
@@ -500,18 +591,18 @@ class GL:
 
         # Os prints abaixo são só para vocês verificarem o funcionamento, DEVE SER REMOVIDO.
         # print("IndexedFaceSet : ")
-        # if coord:
-        #     print("\tpontos(x, y, z) = {0}, coordIndex = {1}".format(coord, coordIndex))
-        # print("colorPerVertex = {0}".format(colorPerVertex))
-        # if colorPerVertex and color and colorIndex:
-        #     print("\tcores(r, g, b) = {0}, colorIndex = {1}".format(color, colorIndex))
-        # if texCoord and texCoordIndex:
-        #     print("\tpontos(u, v) = {0}, texCoordIndex = {1}".format(texCoord, texCoordIndex))
-        # if current_texture:
-        #     image = gpu.GPU.load_texture(current_texture[0])
-        #     print("\t Matriz com image = {0}".format(image))
-        #     print("\t Dimensões da image = {0}".format(image.shape))
-        # print("IndexedFaceSet : colors = {0}".format(colors))  # imprime no terminal as cores
+        if coord:
+            print("\tpontos(x, y, z) = {0}, coordIndex = {1}".format(coord, coordIndex))
+        print("colorPerVertex = {0}".format(colorPerVertex))
+        if colorPerVertex and color and colorIndex:
+            print("\tcores(r, g, b) = {0}, colorIndex = {1}".format(color, colorIndex))
+        if texCoord and texCoordIndex:
+            print("\tpontos(u, v) = {0}, texCoordIndex = {1}".format(texCoord, texCoordIndex))
+        if current_texture:
+            image = gpu.GPU.load_texture(current_texture[0])
+            # print("\t Matriz com image = {0}".format(image))
+            print("\t Dimensões da image = {0}".format(image.shape))
+        print("IndexedFaceSet : colors = {0}".format(colors))  # imprime no terminal as cores
         coords_lists = [[]]
         transform = GL.viewpoint_transform @ GL.transform_stack[-1]
 
@@ -519,29 +610,70 @@ class GL:
         ones = np.ones((coords_np.shape[0], 1), dtype=float)            # [N,1]
         coords4 = np.hstack([coords_np, ones])                          # [N,4]
 
+        # Screen-space transform for XY (includes perspective and screen mapping)
         clip = coords4 @ transform.T                                    # [N,4]
         clip /= clip[:, [3]]                                            # normalize
+        coords_xy = clip[:, :3]
 
-        coords_xy = clip[:, :2]      
-        color = [int(v * 255) for v in colors.get("emissiveColor", [1, 1, 1])]
+        # Camera-space Zs (linear in eye space)
+        # I do this again even tough viewpoint has the same transform 
+        # I could brake down the previous viewpoint transform but the number of computations is almost the same
+        # this Way I  dont mess with parts of the code that are already working aand avoid potential references issues
+        model_transform = GL.transform_stack[-1]
+        cam_transform = GL.camera_transform @ model_transform
+        cam_coords = coords4 @ cam_transform.T                           # [N,4]
+        cam_z = cam_coords[:, 2]
+        # Build per-vertex color list grouped every 3 values (r, g, b)
+        vertexColors = None
+        if colorPerVertex and color and colorIndex:
+            try:
+                vertexColors = np.array(color, dtype=float).reshape(-1, 3)
+                print("vertexColors")
+                print(vertexColors)
+            except ValueError:
+                vertexColors = None
+        singleColor = [int(v * 255) for v in colors.get("emissiveColor", [1, 1, 1])] if vertexColors is None else None
         for coord_i in coordIndex:
             if coord_i == -1:
                 coords_lists.append([])
             else:
                 coords_lists[-1].append(coord_i)
+        # Build per-vertex UVs if provided
+        uv_points = None
+        if texCoord:
+            try:
+                uv_points = np.array(texCoord, dtype=float).reshape(-1, 2)
+            except ValueError:
+                uv_points = None
+
         for face in coords_lists:
             if len(face) < 3:
                 continue
             a = coords_xy[face[0]]
-
+            color_a = vertexColors[face[0]] if vertexColors is not None else None
+            uv_a = uv_points[face[0]] if uv_points is not None else None
             for i in range(1, len(face)-1):
                 b = coords_xy[face[i]]
+                color_b = vertexColors[face[i]] if vertexColors is not None else None
                 c = coords_xy[face[i+1]]
+                color_c = vertexColors[face[i+1]] if vertexColors is not None else None
+                uv_b = uv_points[face[i]] if uv_points is not None else None
+                uv_c = uv_points[face[i+1]] if uv_points is not None else None
+                za = cam_z[face[0]]
+                zb = cam_z[face[i]]
+                zc = cam_z[face[i+1]]
                 area2 = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
-                if area2 > 0:
+                if area2 > 0: #Has to be greater instead of less because of the axis flip in transform
                     b, c = c, b  # enforce CCW winding
-                
-                GL.draw_triangle_2d(a, b, c, color)
+                    color_b, color_c = color_c, color_b
+                    zb, zc = zc, zb
+                    uv_b, uv_c = uv_c, uv_b
+                triVertexColors = [color_a, color_b, color_c]
+                triZs = [za, zb, zc]
+                triUVs = None
+                if uv_a is not None and uv_b is not None and uv_c is not None and current_texture:
+                    triUVs = [uv_a, uv_b, uv_c]
+                GL.draw_triangle_2d(a, b, c, singleColor, triVertexColors, zs=triZs, uvs=triUVs, texture=image if current_texture else None)
 
 
     

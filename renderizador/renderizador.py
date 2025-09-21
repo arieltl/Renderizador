@@ -22,7 +22,7 @@ import scenegraph   # Imprime o grafo de cena no console
 import numpy as np
 LARGURA = 60  # Valor padrão para largura da tela
 ALTURA = 40   # Valor padrão para altura da tela
-
+SUPER_SAMPLING_FACTOR = 2
 
 class Renderizador:
     """Realiza a renderização da cena informada."""
@@ -75,14 +75,15 @@ class Renderizador:
         )
 
         # Descomente as seguintes linhas se for usar um Framebuffer para profundidade
-        # gpu.GPU.framebuffer_storage(
-        #     self.framebuffers["FRONT"],
-        #     gpu.GPU.DEPTH_ATTACHMENT,
-        #     gpu.GPU.DEPTH_COMPONENT32F,
-        #     self.width,
-        #     self.height
-        # )
-    
+        gpu.GPU.framebuffer_storage(
+            self.framebuffers["SUPER"],
+            gpu.GPU.DEPTH_ATTACHMENT,
+            gpu.GPU.DEPTH_COMPONENT32F,
+            self.width * self.super_sampling_factor,
+            self.height * self.super_sampling_factor
+        )
+
+     
         # Opções:
         # - COLOR_ATTACHMENT: alocações para as cores da imagem renderizada
         # - DEPTH_ATTACHMENT: alocações para as profundidades da imagem renderizada
@@ -99,7 +100,7 @@ class Renderizador:
 
         # Define a profundidade que ira apagar o FrameBuffer quando clear_buffer() invocado
         # Assuma 1.0 o mais afastado e -1.0 o mais próximo da camera
-        gpu.GPU.clear_depth(1.0)
+        gpu.GPU.clear_depth([np.inf])
 
         # Definindo tamanho do Viewport para renderização
         self.scene.viewport(width=self.width, height=self.height)
@@ -204,7 +205,7 @@ class Renderizador:
 
         # Abre arquivo X3D
         self.scene = x3d.X3D(self.x3d_file)
-        self.super_sampling_factor = 3
+        self.super_sampling_factor = SUPER_SAMPLING_FACTOR
         # Iniciando Biblioteca Gráfica
         gl.GL.setup(
             self.width*self.super_sampling_factor,
@@ -212,6 +213,7 @@ class Renderizador:
             near=0.01,
             far=1000
         )
+        gl.GL.supersample = self.super_sampling_factor
 
         # Funções que irão fazer o rendering
         self.mapping()
