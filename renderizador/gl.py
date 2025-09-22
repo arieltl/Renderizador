@@ -748,8 +748,8 @@ class GL:
         if current_texture:
             image = gpu.GPU.load_texture(current_texture[0])
             # print("\t Matriz com image = {0}".format(image))
-            print("\t Dimensões da image = {0}".format(image.shape))
-        print("IndexedFaceSet : colors = {0}".format(colors))  # imprime no terminal as cores
+            # print("\t Dimensões da image = {0}".format(image.shape))
+        # print("IndexedFaceSet : colors = {0}".format(colors))  # imprime no terminal as cores
         coords_lists = [[]]
         transform = GL.viewpoint_transform @ GL.transform_stack[-1]
 
@@ -775,8 +775,7 @@ class GL:
         if colorPerVertex and color and colorIndex:
             try:
                 vertexColors = np.array(color, dtype=float).reshape(-1, 3)
-                print("vertexColors")
-                print(vertexColors)
+
             except ValueError:
                 vertexColors = None
         singleColor = [int(v * 255) for v in colors.get("emissiveColor", [1, 1, 1])] if vertexColors is None else None
@@ -851,7 +850,7 @@ class GL:
                     triUVs = [uv_a, uv_b, uv_c]
                 
                 # Call draw_triangle_2d with lighting support
-                if GL.headlight or GL.directionalLightEnabled:
+                if (GL.headlight or GL.directionalLightEnabled) and ((not colorPerVertex) or color is None):
                     GL.draw_triangle_2d(a, b, c, singleColor, triVertexColors, zs=triZs, uvs=triUVs, 
                                       texture=image if current_texture else None, normal=normal, 
                                       material=colors, camera_space_coords=camera_space_coords)
@@ -1029,10 +1028,7 @@ class GL:
         # na primeira e na última chave não forem idênticos, o campo closed será ignorado.
 
         # O print abaixo é só para vocês verificarem o funcionamento, DEVE SER REMOVIDO.
-        print("SplinePositionInterpolator : set_fraction = {0}".format(set_fraction))
-        print("SplinePositionInterpolator : key = {0}".format(key)) # imprime no terminal
-        print("SplinePositionInterpolator : keyValue = {0}".format(keyValue))
-        print("SplinePositionInterpolator : closed = {0}".format(closed))
+
 
         #hermite interpolation
         previous_key = 0
@@ -1045,11 +1041,8 @@ class GL:
                 break
         #reshape keyVlaue to split in 3d vectors
         key_value = np.array(keyValue).reshape(-1, 3)
-        print(f"set_fraction: {set_fraction}")
-        print(f"previous_key: {previous_key}")
-        print(f"next_key: {next_key}")
-        # if previous_key == next_key:
-        #     return keyValue[previous_key]
+
+
         
         s = (set_fraction - key[previous_key]) / (key[next_key] - key[previous_key])
         S = np.array([s**3, s**2, s, 1])
@@ -1063,8 +1056,7 @@ class GL:
             t2 = (key_value[next_key + 1] - key_value[next_key-1 ])/2
         c = np.array([v1,v2,t1,t2])
 
-        print(f"t1: {t1}")
-        print(f"t2: {t2}")
+
 
         # Abaixo está só um exemplo de como os dados podem ser calculados e transferidos
         # value_changed =    S @ H @ c
@@ -1106,11 +1098,8 @@ class GL:
         prev = values[previous_key]
         nextv = values[next_key]
         s = (set_fraction - key[previous_key]) / (key[next_key] - key[previous_key])
-        print(f"rot prev: {prev}")
-        print(f"rot nextv: {nextv}")
-        print(f"rot s: {s}")
+
         value =  [prev[0], prev[1], prev[2],GL.lerp(prev[3], nextv[3], s)]
-        print(f"rot value: {value}")
         return value
         
     @staticmethod

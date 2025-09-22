@@ -22,7 +22,7 @@ import scenegraph   # Imprime o grafo de cena no console
 import numpy as np
 LARGURA = 60  # Valor padrão para largura da tela
 ALTURA = 40   # Valor padrão para altura da tela
-SUPER_SAMPLING_FACTOR = 1
+SUPER_SAMPLING_FACTOR = 2
 
 class Renderizador:
     """Realiza a renderização da cena informada."""
@@ -123,9 +123,12 @@ class Renderizador:
         """Rotinas pré renderização."""
         # Função invocada antes do processo de renderização iniciar.
 
-        # Limpa o frame buffers atual
         gpu.GPU.clear_buffer()
 
+        gpu.GPU.bind_framebuffer(gpu.GPU.FRAMEBUFFER, self.framebuffers["SUPER"])
+        # Limpa o frame buffers atual
+        gpu.GPU.clear_buffer()
+        
         # Recursos que podem ser úteis:
         # Define o valor do pixel no framebuffer: draw_pixel(coord, mode, data)
         # Retorna o valor do pixel no framebuffer: read_pixel(coord, mode)
@@ -137,7 +140,6 @@ class Renderizador:
         # Essa é uma chamada conveniente para manipulação de buffers
         # ao final da renderização de um frame. Como por exemplo, executar
         # downscaling da imagem.
-        
         gpu.GPU.bind_framebuffer(gpu.GPU.FRAMEBUFFER, self.framebuffers["SUPER"])
         ss = self.super_sampling_factor
         #create np array to store pixels
@@ -149,14 +151,15 @@ class Renderizador:
                         pixel = gpu.GPU.read_pixel([j*ss + j_offset, i*ss + i_offset], gpu.GPU.RGB8)
                         pixels[i, j] += pixel
         pixels = pixels / (ss*ss)
-        gpu.GPU.bind_framebuffer(gpu.GPU.FRAMEBUFFER, self.framebuffers["FRONT"])
+        gpu.GPU.bind_framebuffer(gpu.GPU.FRAMEBUFFER, self.framebuffers["BACK"])
         for i in range(self.height):
             for j in range(self.width):
                 gpu.GPU.draw_pixel([j, i], gpu.GPU.RGB8, pixels[i, j])
-        gpu.GPU.bind_framebuffer(gpu.GPU.FRAMEBUFFER, self.framebuffers["SUPER"])
 
         # Método para a troca dos buffers (NÃO IMPLEMENTADO)
         # Esse método será utilizado na fase de implementação de animações
+        gpu.GPU.bind_framebuffer(gpu.GPU.FRAMEBUFFER, self.framebuffers["FRONT"])
+
         gpu.GPU.swap_buffers()
 
     def mapping(self):
