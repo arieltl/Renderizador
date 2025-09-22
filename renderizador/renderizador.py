@@ -46,8 +46,22 @@ class Renderizador:
         self.framebuffers["FRONT"] = fbo[0]
         
 
+        fbback = gpu.GPU.gen_framebuffers(1)
+        self.framebuffers["BACK"] = fbback[0]
+
+
+
         fbsuper = gpu.GPU.gen_framebuffers(1)
         self.framebuffers["SUPER"] = fbsuper[0]
+
+        gpu.GPU.bind_framebuffer(gpu.GPU.FRAMEBUFFER, self.framebuffers["BACK"])
+        gpu.GPU.framebuffer_storage(
+            self.framebuffers["BACK"],
+            gpu.GPU.COLOR_ATTACHMENT,
+            gpu.GPU.RGB8,
+            self.width,
+            self.height
+        )
 
         # Define que a posição criada será usada para desenho e leitura
         gpu.GPU.bind_framebuffer(gpu.GPU.FRAMEBUFFER, self.framebuffers["SUPER"])
@@ -139,6 +153,7 @@ class Renderizador:
         for i in range(self.height):
             for j in range(self.width):
                 gpu.GPU.draw_pixel([j, i], gpu.GPU.RGB8, pixels[i, j])
+        gpu.GPU.bind_framebuffer(gpu.GPU.FRAMEBUFFER, self.framebuffers["SUPER"])
 
         # Método para a troca dos buffers (NÃO IMPLEMENTADO)
         # Esse método será utilizado na fase de implementação de animações

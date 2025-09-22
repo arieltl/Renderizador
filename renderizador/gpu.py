@@ -249,4 +249,10 @@ class GPU:
 
     @staticmethod
     def swap_buffers():
+        front = GPU.frame_buffer[0]
+        back = GPU.frame_buffer[1]
+        front, back = back, front
+        GPU.frame_buffer[0] = front
+        GPU.frame_buffer[1] = back
+
         """Método para a troca dos buffers (NÃO IMPLEMENTADA)."""

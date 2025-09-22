@@ -548,14 +548,11 @@ class GL:
         t_mat = np.identity(4)
         s_mat = np.identity(4)
         r_mat = np.identity(4)
-        if translation:
-            t_mat[:3, 3] = translation
-        if scale:
-            s_mat[:3, :3] = np.diag(scale)
-        if rotation:
-            axis = rotation[:3]
-            angle = rotation[3]
-            r_mat = GL.rotation_mat(axis, angle)
+        t_mat[:3, 3] = translation
+        s_mat[:3, :3] = np.diag(scale)
+        axis = rotation[:3]
+        angle = rotation[3]
+        r_mat = GL.rotation_mat(axis, angle)
         m_local = np.matmul(t_mat, np.matmul(r_mat, s_mat))
         m_parent = GL.transform_stack[-1] if len(GL.transform_stack) > 0 else np.identity(4)
         m = np.matmul(m_parent, m_local)
@@ -1024,8 +1021,44 @@ class GL:
         print("SplinePositionInterpolator : keyValue = {0}".format(keyValue))
         print("SplinePositionInterpolator : closed = {0}".format(closed))
 
+        #hermite interpolation
+        previous_key = 0
+        next_key = 0
+        for k in range(len(key)):
+            if set_fraction >= key[k]:
+                previous_key = k
+            if set_fraction < key[k]:
+                next_key = k
+                break
+        #reshape keyVlaue to split in 3d vectors
+        key_value = np.array(keyValue).reshape(-1, 3)
+        print(f"set_fraction: {set_fraction}")
+        print(f"previous_key: {previous_key}")
+        print(f"next_key: {next_key}")
+        # if previous_key == next_key:
+        #     return keyValue[previous_key]
+        
+        s = (set_fraction - key[previous_key]) / (key[next_key] - key[previous_key])
+        S = np.array([s**3, s**2, s, 1])
+        H = np.array([[2, -2, 1, 1], [-3, 3, -2, -1], [0, 0, 1, 0], [1, 0, 0, 0]])
+        v1 = np.array(key_value[previous_key])
+        v2 = np.array(key_value[next_key])
+        t1 = (key_value[previous_key + 1] - key_value[previous_key-1 ])/2
+        if next_key == len(key_value)-1:
+            t2 = (key_value[1] - key_value[next_key-1])/2
+        else: 
+            t2 = (key_value[next_key + 1] - key_value[next_key-1 ])/2
+        c = np.array([v1,v2,t1,t2])
+
+        print(f"t1: {t1}")
+        print(f"t2: {t2}")
+
         # Abaixo está só um exemplo de como os dados podem ser calculados e transferidos
-        value_changed = [0.0, 0.0, 0.0]
+        # value_changed =    S @ H @ c
+        value_changed = np.matmul(S, np.matmul(H, c))
+
+
+        print(f"value_changed: {value_changed}")
         
         return value_changed
 
@@ -1044,11 +1077,44 @@ class GL:
         # zeroa a um. O campo keyValue deve conter exatamente tantas rotações 3D quanto os
         # quadros-chave no key.
 
+        previous_key = 0
+        next_key = 0
+        for k in range(len(key)):
+            if set_fraction >= key[k]:
+                previous_key = k
+            if set_fraction < key[k]:
+                next_key = k
+                break
+        #reshape keyVlaue to split in 3d vectors
+        key_value = np.array(keyValue).reshape(-1, 3)
+        print(f"set_fraction: {set_fraction}")
+        print(f"previous_key: {previous_key}")
+        print(f"next_key: {next_key}")
+        # if previous_key == next_key:
+        #     return keyValue[previous_key]
+        
+        s = (set_fraction - key[previous_key]) / (key[next_key] - key[previous_key])
+        S = np.array([s**3, s**2, s, 1])
+        H = np.array([[2, -2, 1, 1], [-3, 3, -2, -1], [0, 0, 1, 0], [1, 0, 0, 0]])
+        v1 = np.array(key_value[previous_key])
+        v2 = np.array(key_value[next_key])
+        t1 = (key_value[previous_key + 1] - key_value[previous_key-1 ])/2
+        if next_key == len(key_value)-1:
+            t2 = (key_value[1] - key_value[next_key-1])/2
+        else: 
+            t2 = (key_value[next_key + 1] - key_value[next_key-1 ])/2
+        c = np.array([v1,v2,t1,t2])
 
+        print(f"t1: {t1}")
+        print(f"t2: {t2}")
 
         # Abaixo está só um exemplo de como os dados podem ser calculados e transferidos
-        value_changed = [0, 0, 1, 0]
+        # value_changed =    S @ H @ c
+        value_changed = np.matmul(S, np.matmul(H, c))
 
+
+        print(f"value_changed: {value_changed}")
+        
         return value_changed
 
     # Para o futuro (Não para versão atual do projeto.)
