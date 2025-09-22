@@ -336,17 +336,43 @@ class GL:
         # inicialmente, para o TriangleSet, o desenho das linhas com a cor emissiva
         # (emissiveColor), conforme implementar novos materias você deverá suportar outros
         # tipos de cores.
-        color = [int(v * 255) for v in colors.get("emissiveColor", [1, 1, 1])]
+        # color = [int(v * 255) for v in colors.get("emissiveColor", [1, 1, 1])]
+
+
         print("set")
         print(colors)
         # Pre-calculate the composed transform matrix
         composed_transform = GL.viewpoint_transform @ GL.transform_stack[-1]
+        difuseColor = colors.get("diffuseColor", [1, 1, 1])
+
         
         for i in range(0, len(point), 9):
             # Extract triangle vertices
-            a = [point[i], point[i+1], point[i+2],1]
-            b = [point[i+3], point[i+4], point[i+5],1]
-            c = [point[i+6], point[i+7], point[i+8],1]
+            a = np.array([point[i], point[i+1], point[i+2],1])
+            b = np.array([point[i+3], point[i+4], point[i+5],1])
+            c = np.array([point[i+6], point[i+7], point[i+8],1])
+
+            if GL.headlight:
+                a_world = GL.transform_stack[-1] @ a
+                b_world = GL.transform_stack[-1] @ b
+                c_world = GL.transform_stack[-1] @ c
+
+                camera_space_a = GL.camera_transform @ a_world
+                camera_space_b = GL.camera_transform @ b_world
+                camera_space_c = GL.camera_transform @ c_world
+
+                light_direction = [0,0,1]
+                normal = np.cross(camera_space_b[:3] - camera_space_a[:3], camera_space_c[:3] - camera_space_a[:3])
+                normal = normal / np.linalg.norm(normal)
+                dot_product =(np.dot(normal, light_direction))
+
+                print(normal)
+                print(light_direction)
+                print(dot_product)
+                Ii = 1
+                color = [min(255, max(0, int(v * 255 * Ii * dot_product))) for v in difuseColor]
+            else:
+                color = [int(v * 255) for v in colors.get("emissiveColor", [1, 1, 1])]
             #precompute the transform
             a = composed_transform @ a
             b = composed_transform @ b
@@ -375,6 +401,7 @@ class GL:
         up = np.matmul(rotation, np.array([0, 1, 0]))
     
         forward = np.matmul(rotation, np.array([0, 0, -1]))
+        GL.forward = forward
         at = eye + forward
         # divide by 4th component
 
@@ -753,6 +780,7 @@ class GL:
         # ambientIntensity = 0,0 e direção = (0 0 −1).
 
         # O print abaixo é só para vocês verificarem o funcionamento, DEVE SER REMOVIDO.
+        GL.headlight = headlight
         print("NavigationInfo : headlight = {0}".format(headlight)) # imprime no terminal
 
     @staticmethod
