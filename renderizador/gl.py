@@ -357,8 +357,7 @@ class GL:
                         V_norm = np.linalg.norm(V)
                         if V_norm > 0:
                             V = V / V_norm  # Normalize
-                        else:
-                            V = np.array([0, 0, 1])  # Default if at camera origin
+                      
                         
                         # Light vector L_vec (normalized)
                         L_vec = light_direction / np.linalg.norm(light_direction)
@@ -368,6 +367,8 @@ class GL:
                         
                         # Diffuse component: Ii × ODrgb × (N · L_vec)
                         NdotL = max(0, np.dot(N, L_vec))  # Clamp to positive
+                        # print(f"normal: {N}")
+                        # print(f"NdotL: {NdotL}")
                         diffuse_i = Ii * diffuseColor * NdotL
                         
                         # Specular component: Ii × OSrgb × (N · H)^shininess
@@ -639,61 +640,73 @@ class GL:
         # depois 2, 3 e 4, e assim por diante. Cuidado com a orientação dos vértices, ou seja,
         # todos no sentido horário ou todos no sentido anti-horário, conforme especificado.
         print("IndexedTriangleStripSet : ")
+        # print(point)
+        # print(index)
         # Pre-calculate the composed transform matrix
         composed_transform = GL.viewpoint_transform @ GL.transform_stack[-1]
         color = [int(v * 255) for v in colors.get("emissiveColor", [1, 1, 1])]
         diffuseColor = colors.get("diffuseColor", [1, 1, 1])
         
-        odd = False
-        for vertex_i in range(0, len(index)-3):
-            a_i = index[vertex_i] * 3
-            b_i = index[vertex_i + 1] * 3
-            c_i = index[vertex_i + 2] * 3
-            if odd:
-                b_i, c_i = c_i, b_i
-            odd = not odd
-            
-            # Extract triangle vertices as homogeneous coordinates
-            a = np.array([point[a_i], point[a_i + 1], point[a_i + 2], 1])
-            b = np.array([point[b_i], point[b_i + 1], point[b_i + 2], 1])
-            c = np.array([point[c_i], point[c_i + 1], point[c_i + 2], 1])
+        # split index in i -1
 
-            normal = None
-            camera_space_coords = None
-            
-            if GL.headlight or GL.directionalLightEnabled:
-                # Calculate world space coordinates
-                a_world = GL.transform_stack[-1] @ a
-                b_world = GL.transform_stack[-1] @ b
-                c_world = GL.transform_stack[-1] @ c
-
-                # Calculate camera space coordinates for lighting
-                camera_space_a = GL.camera_transform @ a_world
-                camera_space_b = GL.camera_transform @ b_world
-                camera_space_c = GL.camera_transform @ c_world
-                camera_space_a = camera_space_a[:3] / camera_space_a[3]
-                camera_space_b = camera_space_b[:3] / camera_space_b[3]
-                camera_space_c = camera_space_c[:3] / camera_space_c[3]
-                
-                # Calculate normal in camera space
-                normal = np.cross(camera_space_b[:3] - camera_space_a[:3], camera_space_c[:3] - camera_space_a[:3])
-                normal = normal / np.linalg.norm(normal)
-                
-                camera_space_coords = [camera_space_a, camera_space_b, camera_space_c]
-                color = diffuseColor
-        
-            # Apply transform to get screen coordinates
-            a = composed_transform @ a
-            b = composed_transform @ b
-            c = composed_transform @ c
-            a = a[:3] / a[3]
-            b = b[:3] / b[3]
-            c = c[:3] / c[3]
-            
-            if GL.headlight or GL.directionalLightEnabled:
-                GL.draw_triangle_2d(a, b, c, normal=normal, material=colors, camera_space_coords=camera_space_coords)
+        indexes = [[]]
+        for i in index:
+            if i == -1:
+                indexes.append([])
             else:
-                GL.draw_triangle_2d(a, b, c, color=color, transparency=colors.get("transparency", None))
+                indexes[-1].append(i)
+        indexes = indexes[:-1]
+        for index_l in indexes:
+            odd = False
+
+            for vertex_i in range(0, len(index_l)-3):
+                a_i = index_l[vertex_i] * 3
+                b_i = index_l[vertex_i + 1] * 3
+                c_i = index_l[vertex_i + 2] * 3
+                if odd:
+                    b_i, c_i = c_i, b_i
+                odd = not odd
+                
+                # Extract triangle vertices as homogeneous coordinates
+                a = np.array([point[a_i], point[a_i + 1], point[a_i + 2], 1])
+                b = np.array([point[b_i], point[b_i + 1], point[b_i + 2], 1])
+                c = np.array([point[c_i], point[c_i + 1], point[c_i + 2], 1])
+
+                normal = None
+                camera_space_coords = None
+                
+                if GL.headlight or GL.directionalLightEnabled:
+                    # Calculate world space coordinates
+                    a_world = GL.transform_stack[-1] @ a
+                    b_world = GL.transform_stack[-1] @ b
+                    c_world = GL.transform_stack[-1] @ c
+
+                    # Calculate camera space coordinates for lighting
+                    camera_space_a = GL.camera_transform @ a_world
+                    camera_space_b = GL.camera_transform @ b_world
+                    camera_space_c = GL.camera_transform @ c_world
+                    camera_space_a = camera_space_a[:3] / camera_space_a[3]
+                    camera_space_b = camera_space_b[:3] / camera_space_b[3]
+                    camera_space_c = camera_space_c[:3] / camera_space_c[3]
+                    
+                    # Calculate normal in camera space
+                    normal = -np.cross(camera_space_b[:3] - camera_space_a[:3], camera_space_c[:3] - camera_space_a[:3])
+                    normal = normal / np.linalg.norm(normal)
+                    
+                    camera_space_coords = [camera_space_a, camera_space_b, camera_space_c]
+                    color = diffuseColor
+            
+                # Apply transform to get screen coordinates
+                a = composed_transform @ a
+                b = composed_transform @ b
+                c = composed_transform @ c
+                a = a[:3] / a[3]
+                b = b[:3] / b[3]
+                c = c[:3] / c[3]
+                if GL.headlight or GL.directionalLightEnabled:
+                    GL.draw_triangle_2d(a, b, c, normal=normal, material=colors, camera_space_coords=camera_space_coords)
+                else:
+                    GL.draw_triangle_2d(a, b, c, color=color, transparency=colors.get("transparency", None))
 
 
     @staticmethod
@@ -940,7 +953,7 @@ class GL:
         GL.directionalLight_ambientIntensity = ambientIntensity
         GL.directionalLight_color = color
         GL.directionalLight_intensity = intensity
-        GL.directionalLight_direction = direction
+        GL.directionalLight_direction = [v for v in direction]
         # O print abaixo é só para vocês verificarem o funcionamento, DEVE SER REMOVIDO.
         print("DirectionalLight : ambientIntensity = {0}".format(ambientIntensity))
         print("DirectionalLight : color = {0}".format(color)) # imprime no terminal
@@ -1076,47 +1089,33 @@ class GL:
         # dos valores em keyValue, a fração a ser interpolada vem de set_fraction que varia de
         # zeroa a um. O campo keyValue deve conter exatamente tantas rotações 3D quanto os
         # quadros-chave no key.
-
+        # print(f"rot set_fraction: {set_fraction}")
+        # print(f"rot key: {key}")
+        # print(f"rot keyValue: {keyValue}")
         previous_key = 0
         next_key = 0
+
+        values = np.array(keyValue).reshape(-1, 4)
+     
         for k in range(len(key)):
             if set_fraction >= key[k]:
                 previous_key = k
             if set_fraction < key[k]:
                 next_key = k
                 break
-        #reshape keyVlaue to split in 3d vectors
-        key_value = np.array(keyValue).reshape(-1, 3)
-        print(f"set_fraction: {set_fraction}")
-        print(f"previous_key: {previous_key}")
-        print(f"next_key: {next_key}")
-        # if previous_key == next_key:
-        #     return keyValue[previous_key]
-        
+        prev = values[previous_key]
+        nextv = values[next_key]
         s = (set_fraction - key[previous_key]) / (key[next_key] - key[previous_key])
-        S = np.array([s**3, s**2, s, 1])
-        H = np.array([[2, -2, 1, 1], [-3, 3, -2, -1], [0, 0, 1, 0], [1, 0, 0, 0]])
-        v1 = np.array(key_value[previous_key])
-        v2 = np.array(key_value[next_key])
-        t1 = (key_value[previous_key + 1] - key_value[previous_key-1 ])/2
-        if next_key == len(key_value)-1:
-            t2 = (key_value[1] - key_value[next_key-1])/2
-        else: 
-            t2 = (key_value[next_key + 1] - key_value[next_key-1 ])/2
-        c = np.array([v1,v2,t1,t2])
-
-        print(f"t1: {t1}")
-        print(f"t2: {t2}")
-
-        # Abaixo está só um exemplo de como os dados podem ser calculados e transferidos
-        # value_changed =    S @ H @ c
-        value_changed = np.matmul(S, np.matmul(H, c))
-
-
-        print(f"value_changed: {value_changed}")
+        print(f"rot prev: {prev}")
+        print(f"rot nextv: {nextv}")
+        print(f"rot s: {s}")
+        value =  [prev[0], prev[1], prev[2],GL.lerp(prev[3], nextv[3], s)]
+        print(f"rot value: {value}")
+        return value
         
-        return value_changed
-
+    @staticmethod
+    def lerp(v1, v2, s):
+        return v1 + s * (v2 - v1)
     # Para o futuro (Não para versão atual do projeto.)
     def vertex_shader(self, shader):
         """Para no futuro implementar um vertex shader."""

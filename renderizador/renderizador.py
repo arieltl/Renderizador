@@ -22,7 +22,7 @@ import scenegraph   # Imprime o grafo de cena no console
 import numpy as np
 LARGURA = 60  # Valor padrão para largura da tela
 ALTURA = 40   # Valor padrão para altura da tela
-SUPER_SAMPLING_FACTOR = 2
+SUPER_SAMPLING_FACTOR = 1
 
 class Renderizador:
     """Realiza a renderização da cena informada."""

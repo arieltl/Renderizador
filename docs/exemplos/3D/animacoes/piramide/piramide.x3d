@@ -16,7 +16,7 @@
           <Coordinate point='-1 0 1   1 0 1   1 0 -1   -1 0 -1   0 1 0'/>
         </IndexedFaceSet>
         <Appearance>
-          <Material diffuseColor='0.5 0.5 0.5'/>
+          <Material emissiveColor='0.5 0.5 0.5'/>
         </Appearance>
       </Shape>
     </Transform>
