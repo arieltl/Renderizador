@@ -31,6 +31,12 @@ class GL:
     perspective_transform = np.identity(4)
     supersample = 1
 
+    directionalLightEnabled = False
+    directionalLight_ambientIntensity = 0.0
+    directionalLight_color = [1, 1, 1]
+    directionalLight_intensity = 1.0
+    directionalLight_direction = [0, 0, 1]
+
 
     @staticmethod
     def setup(width, height, near=0.01, far=1000):
@@ -224,7 +230,7 @@ class GL:
 
 
     @staticmethod
-    def draw_triangle_2d(a, b, c, color, colors=None, zs=None, uvs=None, texture=None, transparency=None):
+    def draw_triangle_2d(a, b, c, color=None, colors=None, zs=None, uvs=None, texture=None, transparency=None,material = None,normal = None, camera_space_coords= None):
 
         #
         za = a[2]
@@ -296,7 +302,6 @@ class GL:
                         (u0, v0), (u1, v1), (u2, v2) = uvs
                         u = (alpha * (u0 / z0) + beta * (u1 / z1) + gamma * (u2 / z2)) * z
                         v = (alpha * (v0 / z0) + beta * (v1 / z1) + gamma * (v2 / z2)) * z
-                        # Sample texture with clamp to edge
 
                         w_tex, h = texture.shape[0], texture.shape[1]
                         tx = int(u * w_tex)
@@ -311,12 +316,76 @@ class GL:
                         tb = int(texel[2])
 
                         out_color = [tr, tg, tb]
-                    if transparency is not None and transparency != 1.0:
+                    if transparency is not None and transparency != 1.0 and material is None:
                         old_color = [float(v) for v in gpu.GPU.read_pixel([x, y], gpu.GPU.RGB8)]
                        
                         new_color = [float(v) for v in out_color]
                         out_color = [int(ov *transparency + nv * (1 - transparency)) for ov, nv in zip(old_color, new_color)]
                     
+                    if normal is not None and material is not None and (GL.headlight or GL.directionalLightEnabled):
+                        # Light parameters - use headlight or directional light
+                        if GL.headlight:
+                            light_direction = np.array([0, 0, 1])  # Headlight direction (towards viewer)
+                            Ii = 1  # Light intensity
+                            Iia = 0  # Ambient intensity
+                            ILrgb = [1, 1, 1]  # Light color
+                        else:
+                            light_direction = np.array(GL.directionalLight_direction)
+                            Ii = GL.directionalLight_intensity 
+                            Iia = GL.directionalLight_ambientIntensity
+                            ILrgb = GL.directionalLight_color
+                        
+                        OErgb = np.array(material.get("emissiveColor", [0.0, 0.0, 0.0]), dtype=float)
+                        
+                        # Material properties
+                        diffuseColor = np.array(material.get("diffuseColor", [1, 1, 1]))
+                        specularColor = np.array(material.get("specularColor", [1, 1, 1]))
+                        shininess = material.get("shininess", 0.2) * 128  # X3D shininess is 0-1, convert to 0-128
+                        
+                        # Calculate current point in camera space using barycentric interpolation
+                        if camera_space_coords is not None:
+                            camera_space_a, camera_space_b, camera_space_c = camera_space_coords
+                            current_point_camera = (alpha * camera_space_a + 
+                                                   beta * camera_space_b + 
+                                                   gamma * camera_space_c)
+                        else:
+                            # Fallback if camera space coords not available
+                            current_point_camera = np.array([0, 0, -1])
+                        
+                        # Viewer vector V: from point to camera (camera is at origin in camera space)
+                        V = -current_point_camera[:3]  # Vector from point to camera origin
+                        V_norm = np.linalg.norm(V)
+                        if V_norm > 0:
+                            V = V / V_norm  # Normalize
+                        else:
+                            V = np.array([0, 0, 1])  # Default if at camera origin
+                        
+                        # Light vector L_vec (normalized)
+                        L_vec = light_direction / np.linalg.norm(light_direction)
+                        
+                        # Normal vector N (already normalized)
+                        N = normal
+                        
+                        # Diffuse component: Ii × ODrgb × (N · L_vec)
+                        NdotL = max(0, np.dot(N, L_vec))  # Clamp to positive
+                        diffuse_i = Ii * diffuseColor * NdotL
+                        
+                        # Specular component: Ii × OSrgb × (N · H)^shininess
+                        # where H = (L_vec + V) / |L_vec + V| (half vector)
+                        H = L_vec + V
+                        H_norm = np.linalg.norm(H)
+                        if H_norm > 0:
+                            H = H / H_norm  # Normalize half vector
+                            NdotH = max(0, np.dot(N, H))  # Clamp to positive
+                            specular_i = Ii * specularColor * (NdotH ** shininess)
+                        else:
+                            specular_i = np.array([0, 0, 0])
+                        
+                        ambient_i = Iia * np.array(ILrgb) * diffuseColor
+                        
+                        # Combine emissive, ambient, diffuse and specular
+                        final_color = OErgb + ambient_i + diffuse_i + specular_i
+                        out_color = [min(255, max(0, int(v * 255))) for v in final_color]
 
                     gpu.GPU.draw_pixel([x, y], gpu.GPU.RGB8, out_color)
 
@@ -336,11 +405,10 @@ class GL:
         # inicialmente, para o TriangleSet, o desenho das linhas com a cor emissiva
         # (emissiveColor), conforme implementar novos materias você deverá suportar outros
         # tipos de cores.
-        # color = [int(v * 255) for v in colors.get("emissiveColor", [1, 1, 1])]
+        color = [int(v * 255) for v in colors.get("emissiveColor", [1, 1, 1])]
 
 
         print("set")
-        print(colors)
         # Pre-calculate the composed transform matrix
         composed_transform = GL.viewpoint_transform @ GL.transform_stack[-1]
         difuseColor = colors.get("diffuseColor", [1, 1, 1])
@@ -360,19 +428,18 @@ class GL:
                 camera_space_a = GL.camera_transform @ a_world
                 camera_space_b = GL.camera_transform @ b_world
                 camera_space_c = GL.camera_transform @ c_world
-
-                light_direction = [0,0,1]
+                camera_space_a = camera_space_a[:3] / camera_space_a[3]
+                camera_space_b = camera_space_b[:3] / camera_space_b[3]
+                camera_space_c = camera_space_c[:3] / camera_space_c[3]
                 normal = np.cross(camera_space_b[:3] - camera_space_a[:3], camera_space_c[:3] - camera_space_a[:3])
+                
                 normal = normal / np.linalg.norm(normal)
-                dot_product =(np.dot(normal, light_direction))
 
-                print(normal)
-                print(light_direction)
-                print(dot_product)
-                Ii = 1
-                color = [min(255, max(0, int(v * 255 * Ii * dot_product))) for v in difuseColor]
-            else:
-                color = [int(v * 255) for v in colors.get("emissiveColor", [1, 1, 1])]
+
+
+
+                color = difuseColor
+        
             #precompute the transform
             a = composed_transform @ a
             b = composed_transform @ b
@@ -380,9 +447,11 @@ class GL:
             a = a[:3] / a[3]
             b = b[:3] / b[3]
             c = c[:3] / c[3]
-            
-            # Draw triangle using the extracted function
-            GL.draw_triangle_2d(a, b, c, color, transparency=colors.get("transparency", None))
+            if GL.headlight:
+                GL.draw_triangle_2d(a, b, c, normal=normal, material=colors, camera_space_coords= [camera_space_a, camera_space_b, camera_space_c] )
+            else:
+                GL.draw_triangle_2d(a, b, c, color=color, transparency=colors.get("transparency", None))
+
             
 
 
@@ -537,7 +606,7 @@ class GL:
         # primeiro triângulo será com os vértices 0, 1 e 2, depois serão os vértices 1, 2 e 3,
         # depois 2, 3 e 4, e assim por diante. Cuidado com a orientação dos vértices, ou seja,
         # todos no sentido horário ou todos no sentido anti-horário, conforme especificado.
-
+        print("TriangleStripSet : ")
 
         strip_start = 0
         transform = GL.transform_stack[-1]
@@ -572,12 +641,12 @@ class GL:
         # primeiro triângulo será com os vértices 0, 1 e 2, depois serão os vértices 1, 2 e 3,
         # depois 2, 3 e 4, e assim por diante. Cuidado com a orientação dos vértices, ou seja,
         # todos no sentido horário ou todos no sentido anti-horário, conforme especificado.
-
-        # O print abaixo é só para vocês verificarem o funcionamento, DEVE SER REMOVIDO.
-        transform = GL.transform_stack[-1]
-        viewpoint_transform = GL.viewpoint_transform
-        transform = viewpoint_transform @ transform
+        print("IndexedTriangleStripSet : ")
+        # Pre-calculate the composed transform matrix
+        composed_transform = GL.viewpoint_transform @ GL.transform_stack[-1]
         color = [int(v * 255) for v in colors.get("emissiveColor", [1, 1, 1])]
+        diffuseColor = colors.get("diffuseColor", [1, 1, 1])
+        
         odd = False
         for vertex_i in range(0, len(index)-3):
             a_i = index[vertex_i] * 3
@@ -586,10 +655,48 @@ class GL:
             if odd:
                 b_i, c_i = c_i, b_i
             odd = not odd
-            a = [point[a_i], point[a_i + 1], point[a_i + 2]]
-            b = [point[b_i], point[b_i + 1], point[b_i + 2]]
-            c = [point[c_i], point[c_i + 1], point[c_i + 2]]
-            GL.draw_triangle(a, b, c, transform, color)
+            
+            # Extract triangle vertices as homogeneous coordinates
+            a = np.array([point[a_i], point[a_i + 1], point[a_i + 2], 1])
+            b = np.array([point[b_i], point[b_i + 1], point[b_i + 2], 1])
+            c = np.array([point[c_i], point[c_i + 1], point[c_i + 2], 1])
+
+            normal = None
+            camera_space_coords = None
+            
+            if GL.headlight or GL.directionalLightEnabled:
+                # Calculate world space coordinates
+                a_world = GL.transform_stack[-1] @ a
+                b_world = GL.transform_stack[-1] @ b
+                c_world = GL.transform_stack[-1] @ c
+
+                # Calculate camera space coordinates for lighting
+                camera_space_a = GL.camera_transform @ a_world
+                camera_space_b = GL.camera_transform @ b_world
+                camera_space_c = GL.camera_transform @ c_world
+                camera_space_a = camera_space_a[:3] / camera_space_a[3]
+                camera_space_b = camera_space_b[:3] / camera_space_b[3]
+                camera_space_c = camera_space_c[:3] / camera_space_c[3]
+                
+                # Calculate normal in camera space
+                normal = np.cross(camera_space_b[:3] - camera_space_a[:3], camera_space_c[:3] - camera_space_a[:3])
+                normal = normal / np.linalg.norm(normal)
+                
+                camera_space_coords = [camera_space_a, camera_space_b, camera_space_c]
+                color = diffuseColor
+        
+            # Apply transform to get screen coordinates
+            a = composed_transform @ a
+            b = composed_transform @ b
+            c = composed_transform @ c
+            a = a[:3] / a[3]
+            b = b[:3] / b[3]
+            c = c[:3] / c[3]
+            
+            if GL.headlight or GL.directionalLightEnabled:
+                GL.draw_triangle_2d(a, b, c, normal=normal, material=colors, camera_space_coords=camera_space_coords)
+            else:
+                GL.draw_triangle_2d(a, b, c, color=color, transparency=colors.get("transparency", None))
 
 
     @staticmethod
@@ -619,13 +726,15 @@ class GL:
 
         # Os prints abaixo são só para vocês verificarem o funcionamento, DEVE SER REMOVIDO.
         # print("IndexedFaceSet : ")
-        if coord:
-            print("\tpontos(x, y, z) = {0}, coordIndex = {1}".format(coord, coordIndex))
-        print("colorPerVertex = {0}".format(colorPerVertex))
-        if colorPerVertex and color and colorIndex:
-            print("\tcores(r, g, b) = {0}, colorIndex = {1}".format(color, colorIndex))
-        if texCoord and texCoordIndex:
-            print("\tpontos(u, v) = {0}, texCoordIndex = {1}".format(texCoord, texCoordIndex))
+        # if coord:
+        #     print("\tpontos(x, y, z) = {0}, coordIndex = {1}".format(coord, coordIndex))
+        # print("colorPerVertex = {0}".format(colorPerVertex))
+        # if colorPerVertex and color and colorIndex:
+        #     print("\tcores(r, g, b) = {0}, colorIndex = {1}".format(color, colorIndex))
+        # if texCoord and texCoordIndex:
+        #     print("\tpontos(u, v) = {0}, texCoordIndex = {1}".format(texCoord, texCoordIndex))
+        print("IndexedFaceSet : ")
+        image = None
         if current_texture:
             image = gpu.GPU.load_texture(current_texture[0])
             # print("\t Matriz com image = {0}".format(image))
@@ -674,6 +783,9 @@ class GL:
             except ValueError:
                 uv_points = None
 
+        # Camera space coordinates for lighting calculations
+        cam_coords_3d = cam_coords[:, :3] / cam_coords[:, [3]]  # [N,3] normalized camera space coords
+        
         for face in coords_lists:
             if len(face) < 3:
                 continue
@@ -696,12 +808,46 @@ class GL:
                     color_b, color_c = color_c, color_b
                     zb, zc = zc, zb
                     uv_b, uv_c = uv_c, uv_b
+                
+                # Calculate lighting parameters if needed
+                normal = None
+                camera_space_coords = None
+                if GL.headlight or GL.directionalLightEnabled:
+                    # Get camera space coordinates for this triangle
+                    camera_space_a = cam_coords_3d[face[0]]
+                    camera_space_b = cam_coords_3d[face[i]]
+                    camera_space_c = cam_coords_3d[face[i+1]]
+                    
+                    # Swap if winding was corrected
+                    if area2 > 0:
+                        camera_space_b, camera_space_c = camera_space_c, camera_space_b
+                    
+                    # Calculate normal in camera space
+                    edge1 = camera_space_b - camera_space_a
+                    edge2 = camera_space_c - camera_space_a
+                    normal = np.cross(edge1, edge2)
+                    normal_length = np.linalg.norm(normal)
+                    if normal_length > 0:
+                        normal = normal / normal_length
+                    else:
+                        normal = np.array([0, 0, 1])  # Default normal
+                    
+                    camera_space_coords = [camera_space_a, camera_space_b, camera_space_c]
+                
                 triVertexColors = [color_a, color_b, color_c]
                 triZs = [za, zb, zc]
                 triUVs = None
                 if uv_a is not None and uv_b is not None and uv_c is not None and current_texture:
                     triUVs = [uv_a, uv_b, uv_c]
-                GL.draw_triangle_2d(a, b, c, singleColor, triVertexColors, zs=triZs, uvs=triUVs, texture=image if current_texture else None)
+                
+                # Call draw_triangle_2d with lighting support
+                if GL.headlight or GL.directionalLightEnabled:
+                    GL.draw_triangle_2d(a, b, c, singleColor, triVertexColors, zs=triZs, uvs=triUVs, 
+                                      texture=image if current_texture else None, normal=normal, 
+                                      material=colors, camera_space_coords=camera_space_coords)
+                else:
+                    GL.draw_triangle_2d(a, b, c, singleColor, triVertexColors, zs=triZs, uvs=triUVs, 
+                                      texture=image if current_texture else None, transparency=colors.get("transparency", None))
 
 
     
@@ -793,7 +939,11 @@ class GL:
         # cor, intensidade. O campo de direção especifica o vetor de direção da iluminação
         # que emana da fonte de luz no sistema de coordenadas local. A luz é emitida ao
         # longo de raios paralelos de uma distância infinita.
-
+        GL.directionalLightEnabled = True
+        GL.directionalLight_ambientIntensity = ambientIntensity
+        GL.directionalLight_color = color
+        GL.directionalLight_intensity = intensity
+        GL.directionalLight_direction = direction
         # O print abaixo é só para vocês verificarem o funcionamento, DEVE SER REMOVIDO.
         print("DirectionalLight : ambientIntensity = {0}".format(ambientIntensity))
         print("DirectionalLight : color = {0}".format(color)) # imprime no terminal
